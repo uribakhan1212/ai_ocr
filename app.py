@@ -65,9 +65,32 @@ def create_word_document(extracted_text, filename="extracted_text.docx"):
     # Parse and format the extracted text
     lines = extracted_text.split('\n')
     
-    for line in lines:
-        line = line.strip()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
         if not line:
+            i += 1
+            continue
+            
+        # Check if this is the start of a table
+        if line.startswith('|') and '|' in line[1:]:
+            # Process table
+            table_lines = []
+            j = i
+            
+            # Collect all table lines
+            while j < len(lines) and lines[j].strip().startswith('|'):
+                table_line = lines[j].strip()
+                # Skip separator lines (like | :--- | :--- |)
+                if not all(c in '|:-= ' for c in table_line):
+                    table_lines.append(table_line)
+                j += 1
+            
+            if table_lines:
+                create_word_table(doc, table_lines)
+            
+            i = j
             continue
             
         # Handle different markdown elements
@@ -85,11 +108,6 @@ def create_word_document(extracted_text, filename="extracted_text.docx"):
             # Level 1 heading
             heading_text = line.replace('#', '').strip()
             doc.add_heading(heading_text, level=1)
-            
-        elif line.startswith('|') and '|' in line[1:]:
-            # Table row - skip for now, add as regular paragraph
-            # (Full table parsing would be more complex)
-            doc.add_paragraph(line)
             
         elif line.startswith('*') or line.startswith('-'):
             # Bullet point
@@ -112,6 +130,8 @@ def create_word_document(extracted_text, filename="extracted_text.docx"):
                 formatted_text = parse_inline_formatting(line)
                 p = doc.add_paragraph()
                 add_formatted_text(p, formatted_text)
+        
+        i += 1
     
     # Save to bytes buffer
     doc_buffer = io.BytesIO()
@@ -119,6 +139,57 @@ def create_word_document(extracted_text, filename="extracted_text.docx"):
     doc_buffer.seek(0)
     
     return doc_buffer
+
+def create_word_table(doc, table_lines):
+    """Create a Word table from markdown table lines"""
+    if not table_lines:
+        return
+    
+    # Parse table data
+    table_data = []
+    for line in table_lines:
+        # Split by | and clean up
+        cells = [cell.strip() for cell in line.split('|')[1:-1]]  # Remove first and last empty elements
+        if cells:  # Only add non-empty rows
+            table_data.append(cells)
+    
+    if not table_data:
+        return
+    
+    # Create Word table
+    rows = len(table_data)
+    cols = len(table_data[0]) if table_data else 0
+    
+    if rows == 0 or cols == 0:
+        return
+    
+    # Create table
+    table = doc.add_table(rows=rows, cols=cols)
+    table.style = 'Table Grid'
+    
+    # Fill table data
+    for row_idx, row_data in enumerate(table_data):
+        for col_idx, cell_data in enumerate(row_data):
+            if col_idx < len(table.rows[row_idx].cells):
+                cell = table.rows[row_idx].cells[col_idx]
+                
+                # Parse formatting for cell content
+                formatted_text = parse_inline_formatting(cell_data)
+                
+                # Clear existing content
+                cell.text = ''
+                
+                # Add formatted content
+                paragraph = cell.paragraphs[0]
+                add_formatted_text(paragraph, formatted_text)
+                
+                # Make header row bold
+                if row_idx == 0:
+                    for run in paragraph.runs:
+                        run.bold = True
+    
+    # Add some spacing after table
+    doc.add_paragraph("")
 
 def parse_inline_formatting(text):
     """Parse inline markdown formatting like **bold** and return formatted segments"""
